@@ -1,0 +1,5 @@
+{
+    "use_proxies": false,
+    "proxies_location": "assets/proxies.txt",
+    "tokens_location": "assets/tokens.txt"
+  }
