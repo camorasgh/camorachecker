@@ -3,5 +3,9 @@
   "proxies_location": "assets/proxies.txt",
   "tokens_location": "assets/tokens.txt",
   "valid_output_location": "output/valid.txt",
-  "invalid_output_location": "output/invalid.txt"
+  "invalid_output_location": "output/invalid.txt",
+  "boost_output_location": "output/boost.txt", 
+  "locked_output_location": "output/locked.txt",
+  "flagged_output_location": "output/flagged.txt",
+  "threads": "100"
 }
