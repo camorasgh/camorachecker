@@ -1,16 +1,19 @@
 import json
 import requests
 import threading
-from queue import Queue
 import os
 from rich.console import Console
 from rich.text import Text
-from rich import print as rprint
 import time
+from pathlib import Path
+import random
+import urllib3
+urllib3.disable_warnings()
 
 console = Console()
 checked_count = 0
 lock = threading.Lock()
+proxy_index = 0
 
 def gradient_print(text, start_color=(147, 51, 234), end_color=(59, 130, 246)):
     for line in text.split('\n'):
@@ -19,7 +22,7 @@ def gradient_print(text, start_color=(147, 51, 234), end_color=(59, 130, 246)):
         console.print(gradient_text)
 
 def print_banner():
-    os.system('title Camora Checker I discord.gg/camora')
+    os.system('title Token Checker')
     banner = """
    ______                                    ________              __            
   / ____/___ _____ ___  ____  _________ _   / ____/ /_  ___  _____/ /_____  _____
@@ -28,6 +31,11 @@ def print_banner():
 \____/\__,_/_/ /_/ /_/\____/_/   \__,_/   \____/_/ /_/\___/\___/_/|_|\___/_/                                                                                                                                                                                                                                           
 """
     gradient_print(banner)
+
+def setup_output_directory():
+    Path("output").mkdir(exist_ok=True)
+    open("output/valid.txt", "w").close()
+    open("output/invalid.txt", "w").close()
 
 def load_config():
     with open("config.json", "r") as f:
@@ -46,56 +54,96 @@ def load_proxies():
 def truncate_token(token):
     return token[:25] + "..."
 
-def check_token(token, proxy=None):
-    global checked_count
-    headers = {"Authorization": token, "Content-Type": "application/json"}
-    proxies = {"http": proxy, "https": proxy} if proxy else None
-    
-    try:
-        response = requests.get("https://discord.com/api/v9/users/@me", headers=headers, proxies=proxies, timeout=5)
-        with lock:
-            checked_count += 1
-        
-        if response.status_code == 200:
-            rprint(f"[bold green][VALID][/bold green] {truncate_token(token)}")
-        elif response.status_code == 429:
-            reset_after = response.json().get('retry_after', 1)
-            time.sleep(reset_after)
-            return check_token(token, proxy)
-        elif response.text.strip() == "":
-            rprint(f"[bold yellow][ERROR][/bold yellow] {truncate_token(token)} - Empty response, retrying...")
-            time.sleep(2)
-            return check_token(token, proxy)
-        else:
-            rprint(f"[bold red][INVALID][/bold red] {truncate_token(token)}")
-    except requests.exceptions.RequestException as e:
-        rprint(f"[bold yellow][ERROR][/bold yellow] {truncate_token(token)} - Connection error: {e}")
-    except json.JSONDecodeError:
-        rprint(f"[bold yellow][ERROR][/bold yellow] {truncate_token(token)} - Invalid JSON response")
-    except Exception as e:
-        rprint(f"[bold yellow][ERROR][/bold yellow] {truncate_token(token)} - {str(e)}")
+def save_token(token, status):
+    filename = "output/valid.txt" if status == "valid" else "output/invalid.txt"
+    with lock:
+        with open(filename, "a") as f:
+            f.write(f"{token}\n")
 
-def worker():
-    while True:
+def check_token(token, proxy_pool):
+    global checked_count, proxy_index
+    headers = {
+        "Authorization": token,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+
+    status = None
+    for _ in range(5):
         try:
-            token = queue.get(timeout=3)
-        except:
-            break
-        proxy = proxies[checked_count % len(proxies)] if proxies else None
-        check_token(token, proxy)
-        queue.task_done()
+            with lock:
+                if proxy_pool:
+                    current_proxy = proxy_pool[proxy_index % len(proxy_pool)]
+                    proxy_index += 1
+                else:
+                    current_proxy = None
+
+            proxies = {"http": f"http://{current_proxy}", "https": f"http://{current_proxy}"} if current_proxy else None
+
+            response = requests.get(
+                "https://discord.com/api/v9/users/@me",
+                headers=headers,
+                proxies=proxies,
+                timeout=15,
+                verify=False
+            )
+
+            if response.status_code == 200:
+                status = "valid"
+                break
+            elif response.status_code == 429:
+                retry_after = response.json().get('retry_after', 1)
+                time.sleep(retry_after)
+                continue
+            else:
+                status = "invalid"
+                break
+
+        except Exception as e:
+            time.sleep(1)
+            continue
+
+    with lock:
+        checked_count += 1
+        if status == "valid":
+            console.print(f"[bold green][VALID][/bold green] {truncate_token(token)}")
+            save_token(token, "valid")
+        else:
+            console.print(f"[bold red][INVALID][/bold red] {truncate_token(token)}")
+            save_token(token, "invalid")
+
+def worker(tokens, proxy_pool):
+    for token in tokens:
+        check_token(token, proxy_pool)
+
+def chunk_list(lst, n):
+    return [lst[i::n] for i in range(n)]
+
+def process_tokens(tokens, proxy_pool):
+    num_threads = len(proxy_pool) if proxy_pool else 100
+    chunks = chunk_list(tokens, num_threads)
+    threads = []
+    
+    for chunk in chunks:
+        thread = threading.Thread(target=worker, args=(chunk, proxy_pool))
+        thread.start()
+        threads.append(thread)
+    
+    for thread in threads:
+        thread.join()
 
 if __name__ == "__main__":
     os.system('cls' if os.name == 'nt' else 'clear')
     print_banner()
+    setup_output_directory()
+    
     config = load_config()
     tokens = load_tokens()
     proxies = load_proxies()
-    queue = Queue()
-    rprint(f"[bold rgb(147,51,234)][NOTIFICATION] Starting Checking {len(tokens)} Tokens[/bold rgb(147,51,234)]")
-    for token in tokens:
-        queue.put(token)
-    threads = [threading.Thread(target=worker, daemon=True) for _ in range(min(50, len(tokens)))]
-    for thread in threads:
-        thread.start()
-    queue.join()
+    
+    console.print(f"[bold rgb(147,51,234)][NOTIFICATION] Starting check with {len(proxies)} proxies[/bold rgb(147,51,234)]")
+    console.print(f"[bold rgb(147,51,234)][NOTIFICATION] Processing {len(tokens)} tokens[/bold rgb(147,51,234)]")
+    
+    process_tokens(tokens, proxies)
+    
+    console.print(f"[bold rgb(147,51,234)][COMPLETE] Checked {checked_count} tokens[/bold rgb(147,51,234)]")
