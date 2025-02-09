@@ -1,5 +1,7 @@
 {
-    "use_proxies": false,
-    "proxies_location": "assets/proxies.txt",
-    "tokens_location": "assets/tokens.txt"
-  }
+  "use_proxies": true,
+  "proxies_location": "assets/proxies.txt",
+  "tokens_location": "assets/tokens.txt",
+  "valid_output_location": "output/valid.txt",
+  "invalid_output_location": "output/invalid.txt"
+}
